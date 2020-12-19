@@ -123,9 +123,23 @@ namespace WindowsFormsApp16
             string pnev = ((Pizza)listBox_Pizzak.SelectedItem).Pnev;
             decimal db = numericUpDown_Db.Value;
             //-- leellenőrizzük, szerepel-e már a listában -----
+            bool nincs = true;
 
+            for (int i = 0; i < listBox_REndelt_pizzak.Items.Count; i++)
+            {
 
-            listBox_REndelt_pizzak.Items.Add(new MegrendeltPizza(vazon, pazon, pnev, db));
+                if (((MegrendeltPizza)listBox_REndelt_pizzak.Items[i]).Pazon == pazon)
+                {
+                    ((MegrendeltPizza)listBox_REndelt_pizzak.Items[i]).Db += db;
+                    listBox_REndelt_pizzak.Items[i] = listBox_REndelt_pizzak.Items[i]; //-- frissíti a tartalmat
+                    nincs = false;
+                }
+            }
+
+            if (nincs)
+            {
+                listBox_REndelt_pizzak.Items.Add(new MegrendeltPizza(vazon, pazon, pnev, db));
+            }
         }
 
         private void button_Insert_Click(object sender, EventArgs e)
@@ -139,36 +153,49 @@ namespace WindowsFormsApp16
             int vazon = ((Vevo)listBox_vevok.SelectedItem).Vazon;
             sql.Transaction = myTrans;
             myTrans = conn.BeginTransaction();
-            using (MySqlDataReader dr = sql.ExecuteReader())
-            {
-                while (dr.Read())
-                {
-                    razon = dr.GetInt32("razon");
-                }
-            }
+ 
             try
             {
-                //-- razon értékének a lekérdezése
+                //-- razon értékének a lekérdezése ------------------
                 sql.CommandText = "SELECT MAX(`razon`)+1 FROM rendeles";
                 object result = sql.ExecuteScalar();
                 if (result != null)
                 {
                     razon = Convert.ToInt32(result);
                 }
+                //-- rendelés indítása --------------------------------
                 sql.CommandText = "INSERT INTO `rendeles`(`razon`, `vazon`, `fazon`) VALUES (" + razon + "," + vazon + ",1)";
-                sql.ExecuteNonQuery();
+                if (sql.ExecuteNonQuery() != 1)
+                {
+                    //-- Nem sikerült a rendelésbe beszúrni a rekordot, visszavonás -----------------
+                    myTrans.Rollback();
+                    MessageBox.Show("Rendelés rögzítése sikertelen!");
+                    return;
+                }
+                //-- rendelési tételek rögzítése --------------------------
+                sql.CommandText = "INSERT INTO `tetel`(`razon`, `pazon`, `db`) VALUES ";
+                int rowNum = 0;
                 foreach (MegrendeltPizza item in listBox_REndelt_pizzak.Items)
                 {
-                    sql.CommandText = "INSERT INTO `tetel`(`razon`, `pazon`, `db`) VALUES (" + razon + "," + item.Pazon + "," + item.Db + ")";
-                    sql.ExecuteNonQuery();
+                    sql.CommandText += "(" + razon + "," + item.Pazon + "," + item.Db + "),";
+                    rowNum++;
                 }
+                sql.CommandText = sql.CommandText.Trim(',');
+                if (rowNum != sql.ExecuteNonQuery())
+                {
+                    //--- A rendelt pizzák száma és a beszúrt rekordok száma eltér! -------------
+                    myTrans.Rollback();
+                    MessageBox.Show("Rendelés rögzítése sikertelen!");
+                    return;
+                }
+
                 myTrans.Commit();
                 MessageBox.Show("rendelés rögzítve");
             }
             catch (Exception ex)
             {
-                MessageBox.Show(ex.Message);
-                myTrans.Rollback();
+                myTrans.Rollback(); //-- adatmódosítások visszavonása
+                MessageBox.Show("Rendelés rögzítése sikertelen!\n\n" + ex.Message);
                 return;
             }
             //-- rendelés táblába besz.
